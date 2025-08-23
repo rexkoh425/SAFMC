@@ -107,7 +107,7 @@ static void mission_task(void *parameters) {
     while (1) vTaskDelay(1000);
 
 }
-/*
+
 void swarm_comm_handle_ctrl_msg(uint8_t src, swarm_comm_ctrl_msg_t msg) {
     if (msg.type == CTRL_MSG_TYPE_START) {
         xSemaphoreGive(start_semaphore);
@@ -115,30 +115,4 @@ void swarm_comm_handle_ctrl_msg(uint8_t src, swarm_comm_ctrl_msg_t msg) {
     if (src == SWARM_NUM_DRONES - 1 && msg.type == CTRL_MSG_TYPE_DONE) {
         xSemaphoreGive(done_semaphore);
     }
-}
-*/
-
-void swarm_comm_handle_ctrl_msg(uint8_t src, swarm_comm_ctrl_msg_t msg) {
-    DEBUG_PRINT("[APP] ctrl src=%u type=%u pose=0x%04X\n",
-                (unsigned)src, (unsigned)msg.type, (unsigned)msg.pose.raw);
-
-    if (msg.type == CTRL_MSG_TYPE_START) {
-        // Send a minimal pose back so bridge.py logs a MSG (not only the ACK)
-        //swarm_pose_t pose = (swarm_pose_t){0};
-        //pose.id.raw = (swarm_id << 12) | 1;   // 0/0001 for mapping drone
-        //pose.x = 1.0f; pose.y = 0.0f; pose.yaw = 0.1f; pose.num_edges = 0;
-
-        //swarm_graph_store_pose(&pose);
-        //swarm_radio_send_msg(RADIO_ADR_BRIDGE, COMM_MSG_TAG_POSE,&pose, sizeof(pose));
-        //DEBUG_PRINT("[APP] sent test POSE to bridge\n");
-
-        // Keep your original flow: wake anything waiting to start
-        xSemaphoreGive(start_semaphore);
-    }
-
-    if (msg.type == CTRL_MSG_TYPE_DONE && src == SWARM_NUM_DRONES-1) {
-        xSemaphoreGive(done_semaphore);
-    }
-
-    // (optional) handle CTRL_MSG_TYPE_POSE if you need
 }
