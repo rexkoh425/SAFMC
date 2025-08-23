@@ -17,6 +17,7 @@ import cflib.crtp
 from cflib.crazyflie import Crazyflie
 from cflib.crtp.crtpstack import CRTPPacket
 from termcolor import colored
+import time
 
 vicon_enabled = False
 
@@ -102,6 +103,7 @@ cf.add_port_callback(10, _msg_packet_received)
 
 cf.open_link("usb://0")
 
+
 seq_nums = {}
 messages = {}
 drop_filter = []
@@ -114,33 +116,35 @@ def handle_packet(data):
     end = bool(data[1] & 0x02)
     seq = (data[1] >> 4) & 0x0F
     tag = (data[1] >> 2) & 0x03
+
     print(datetime.now().time(),
           f"{colored(str(src), 'blue')} -> {colored('B' if dst == 0xF else str(dst), 'blue')} SEQ={seq} " +
           (colored('[ACK] ', 'green') if ack else f"TAG={tag} ") + colored('[END] ' if end else '', 'yellow') +
           "".join("{:02x}".format(x) for x in data[2:]))
 
+
     if not ack:
-        # Check for new packets
-        if src in drop_filter:
-            if end:
-                drop_filter.remove(src)
-        elif src not in seq_nums or (seq_nums[src] + 1) % 16 == seq:
-            seq_nums[src] = seq
-            if src not in messages:
-                messages[src] = []
-            messages[src] += data[2:]
-            if end:
-                print(datetime.now().time(),
-                    f"{colored(str(src), 'magenta')} => {colored('B' if dst == 0xF else str(dst), 'magenta')} " +
-                    f"(MSG) TAG={tag} LEN={len(messages[src])}")
-                print("".join("{:02x}".format(x) for x in messages[src]))
-                decode_msg(tag, bytes(messages[src]))
-                messages[src] = []
-        elif seq_nums[src] != seq:
-            print(colored(f">> Packet drop detected from {src}!", "red"))
-            drop_filter.append(src)
-            del seq_nums[src]
-            messages[src] = []
+          # Check for new packets
+          if src in drop_filter:
+              if end:
+                  drop_filter.remove(src)
+          elif src not in seq_nums or (seq_nums[src] + 1) % 16 == seq:
+              seq_nums[src] = seq
+              if src not in messages:
+                  messages[src] = []
+              messages[src] += data[2:]
+              if end:
+                  print(datetime.now().time(),
+                        f"{colored(str(src), 'magenta')} => {colored('B' if dst == 0xF else str(dst), 'magenta')} " +
+                        f"(MSG) TAG={tag} LEN={len(messages[src])}")
+                  print("".join("{:02x}".format(x) for x in messages[src]))
+                  decode_msg(tag, bytes(messages[src]))
+                  messages[src] = []
+          elif seq_nums[src] != seq:
+              print(colored(f">> Packet drop detected from {src}!", "red"))
+              drop_filter.append(src)
+              del seq_nums[src]
+              messages[src] = []
 
 
 def decode_pose_id(uint16):
@@ -208,7 +212,10 @@ def pose_update(drone, node):
         vicon_log.flush()
         print(f"{drone}/{node}:", pos)
 
+while not is_connected:
+    time.sleep(0.05)
 
-for i in range(1):
-    input(f"Press Enter to start drone {i}...\n")
-    send_start(i)
+target_id = int(os.environ.get("DRONE_ID", "0"))
+print(f"Target drone ID: {target_id}")
+input("Press Enter to send START...\n")
+send_start(target_id)

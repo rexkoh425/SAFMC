@@ -165,6 +165,7 @@ void swarm_comm_tx_task(void *parameters) {
 void swarm_radio_handle_msg(uint8_t src, uint8_t tag, uint8_t *data,
                             size_t len) {
 
+    // Handle the incoming message depending on it's tag
     switch (tag) {
         case COMM_MSG_TAG_POSE: {
             if (len == sizeof(swarm_pose_t)) {
@@ -198,11 +199,9 @@ void swarm_radio_handle_msg(uint8_t src, uint8_t tag, uint8_t *data,
             }
             break;
         }
-	
         case COMM_TX_QUEUE_ITEM_CTRL: {
             swarm_comm_handle_ctrl_msg(src, *(swarm_comm_ctrl_msg_t *) data);
         }
-
     }
 
 }

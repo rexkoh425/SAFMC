@@ -54,4 +54,4 @@ cf.connection_failed.add_callback(_connection_failed)
 cf.connection_lost.add_callback(_connection_lost)
 cf.console.receivedChar.add_callback(lambda chars: sys.stdout.write(chars))
 
-cf.open_link(sys.argv[1])
+cf.open_link(sys.argv[1] + "?rate_limit=10")

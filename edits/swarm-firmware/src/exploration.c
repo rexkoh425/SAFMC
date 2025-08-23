@@ -123,7 +123,6 @@ static void add_pose(uint16_t id, float out[3]) {
     // Broadcast pose to swarm (async)
     swarm_comm_broadcast_pose(pose.id);
 
-    // Send scan to bridge (async)
     swarm_comm_send_scan(RADIO_ADR_BRIDGE, pose.id);
 
 }

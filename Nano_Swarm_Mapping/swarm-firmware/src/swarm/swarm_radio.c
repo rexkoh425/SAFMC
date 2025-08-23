@@ -85,33 +85,32 @@ static void send_ack(uint8_t dst, uint8_t seq) {
     radiolinkSendP2PPacketBroadcast(&tx_p2p_packet);
 }
 
-void swarm_radio_send_msg(uint8_t dst, uint8_t tag, void *data, size_t len) {
 
-    // Make sure the receiver can buffer this message;
+
+/*
+void swarm_radio_send_msg(uint8_t dst, uint8_t tag, void *data, size_t len) {
     ASSERT(len <= sizeof(rx_buffer[0]));
 
-    // Prepare basic packet
     P2PPacket tx_p2p_packet = {0};
     comm_packet_t *tx_packet = (comm_packet_t *) tx_p2p_packet.data;
     tx_packet->src = swarm_id;
     tx_packet->dst = dst;
     tx_packet->tag = tag;
 
-    // Send data in chunks
     uint8_t seq = (seq_nums[swarm_id] + 1) & 0xF;
-    for (size_t offset = 0; offset < len;) {
+    size_t offset = 0;
 
-        // Set END field in header
-        tx_packet->end = offset + RADIO_PKT_MAX_DATA_SIZE >= len;
+    while (offset < len) {
+        const size_t payload_len = MIN(len - offset, RADIO_PKT_MAX_DATA_SIZE);
 
-        // Set packet size
-        tx_p2p_packet.size = RADIO_PKT_HEADER_SIZE +
-                             MIN(len - offset, RADIO_PKT_MAX_DATA_SIZE);
+        // header fields
+        tx_packet->end = (offset + payload_len) >= len;
+        tx_p2p_packet.size = RADIO_PKT_HEADER_SIZE + payload_len;
 
-        // Copy data into packet
-        memcpy(tx_packet->data, data + offset, tx_p2p_packet.size);
+        // copy ONLY the payload
+        memcpy(tx_packet->data, ((const uint8_t*)data) + offset, payload_len);
 
-        // Configure sequence number and acknowledgements
+        // ACK expectations
         uint16_t ack_expect;
         int wait_periods;
         if (dst == RADIO_ADR_BROADCAST) {
@@ -121,39 +120,172 @@ void swarm_radio_send_msg(uint8_t dst, uint8_t tag, void *data, size_t len) {
             wait_periods = 4;
             ack_expect = 1 << dst;
         }
+
         xSemaphoreTake(ack_mutex, portMAX_DELAY);
         tx_packet->seq = seq_nums[swarm_id] = seq;
         ack_received = 0;
         xSemaphoreGive(ack_mutex);
 
-        // Send the packet
         radiolinkSendP2PPacketBroadcast(&tx_p2p_packet);
 
-        // Wait for acknowledgements
         bool success = false;
-        for (; wait_periods > 0; wait_periods--) {
+        for (int wp = wait_periods; wp > 0; wp--) {
             vTaskDelay(M2T(RADIO_SLOT_DURATION));
             xSemaphoreTake(ack_mutex, portMAX_DELAY);
-            if (ack_received == ack_expect) {
-                xSemaphoreGive(ack_mutex);
-                success = true;
-                break;
-            }
+            if (ack_received == ack_expect) { xSemaphoreGive(ack_mutex); success = true; break; }
             xSemaphoreGive(ack_mutex);
         }
 
-        // Send next chunk if ACKs were received
         if (success) {
-            offset += RADIO_PKT_MAX_DATA_SIZE;
+            offset += payload_len;               // ✅ advance by what we actually sent
             seq = (seq + 1) & 0xF;
         } else {
-            // Back off to avoid further collisions
             vTaskDelay(swarm_id * RADIO_SLOT_DURATION);
         }
-
     }
-
 }
+*/
+/*
+void swarm_radio_send_msg(uint8_t dst, uint8_t tag, void *data, size_t len)
+{
+    ASSERT(len <= sizeof(rx_buffer[0]));
+
+    P2PPacket tx_p2p_packet = (P2PPacket){0};
+    comm_packet_t *tx_packet = (comm_packet_t *)tx_p2p_packet.data;
+    tx_packet->src = swarm_id;
+    tx_packet->dst = dst;
+    tx_packet->tag = tag;
+
+    uint8_t seq = (seq_nums[swarm_id] + 1) & 0xF;
+    size_t offset = 0;
+
+    const bool no_ack = (dst == RADIO_ADR_BRIDGE);   // <-- bridge never ACKs
+
+    while (offset < len) {
+        const size_t payload_len = MIN(len - offset, RADIO_PKT_MAX_DATA_SIZE);
+
+        tx_packet->end = (offset + payload_len) >= len;
+        tx_p2p_packet.size = RADIO_PKT_HEADER_SIZE + payload_len;
+
+        // copy ONLY the payload we intend to send in this chunk
+        memcpy(tx_packet->data, ((const uint8_t*)data) + offset, payload_len);
+
+        uint16_t ack_expect = 0;
+        int wait_periods = 0;
+
+        if (!no_ack) {
+            if (dst == RADIO_ADR_BROADCAST) {
+                // Expect acks from DRONES only, NOT from the bridge
+                // drones have IDs [0 .. SWARM_NUM_DRONES-1], bridge is RADIO_ADR_BRIDGE
+                ack_expect = ((1u << SWARM_NUM_DRONES) - 1u) & ~(1u << swarm_id);
+                wait_periods = SWARM_NUM_DRONES + 2;
+            } else {
+                ack_expect = 1u << dst;
+                wait_periods = 4;
+            }
+        }
+
+        xSemaphoreTake(ack_mutex, portMAX_DELAY);
+        tx_packet->seq = seq_nums[swarm_id] = seq;
+        ack_received = 0;
+        xSemaphoreGive(ack_mutex);
+
+        // DEBUG_PRINT("[TX] dst=%u tag=%u pay=%u end=%u seq=%u\n",
+        //   (unsigned)tx_packet->dst, (unsigned)tx_packet->tag,
+        //   (unsigned)payload_len, (unsigned)tx_packet->end, (unsigned)tx_packet->seq);
+
+        radiolinkSendP2PPacketBroadcast(&tx_p2p_packet);
+
+        if (no_ack) {
+            // Fire-and-forget to bridge: advance immediately
+            offset += payload_len;
+            seq = (seq + 1) & 0xF;
+            continue;
+        }
+
+        bool success = false;
+        for (int wp = wait_periods; wp > 0; wp--) {
+            vTaskDelay(M2T(RADIO_SLOT_DURATION));
+            xSemaphoreTake(ack_mutex, portMAX_DELAY);
+            if (ack_received == ack_expect) { xSemaphoreGive(ack_mutex); success = true; break; }
+            xSemaphoreGive(ack_mutex);
+        }
+
+        if (success) {
+            offset += payload_len;
+            seq = (seq + 1) & 0xF;
+        } else {
+            vTaskDelay(M2T(swarm_id * RADIO_SLOT_DURATION));
+        }
+    }
+}
+*/
+void swarm_radio_send_msg(uint8_t dst, uint8_t tag, void *data, size_t len) {
+    ASSERT(len <= sizeof(rx_buffer[0]));
+
+    P2PPacket tx_p2p_packet = {0};
+    comm_packet_t *tx_packet = (comm_packet_t *) tx_p2p_packet.data;
+    tx_packet->src = swarm_id;
+    tx_packet->dst = dst;
+    tx_packet->tag = tag;
+
+    bool expect_ack = (dst != RADIO_ADR_BRIDGE) && (dst != RADIO_ADR_BROADCAST);
+
+    uint8_t seq = (seq_nums[swarm_id] + 1) & 0xF;
+    size_t offset = 0;
+
+    while (offset < len) {
+        size_t payload_len = MIN(len - offset, RADIO_PKT_MAX_DATA_SIZE);
+
+        tx_packet->end = (offset + payload_len) >= len;
+        tx_p2p_packet.size = RADIO_PKT_HEADER_SIZE + payload_len;
+        memcpy(tx_packet->data, ((const uint8_t*)data) + offset, payload_len);
+
+        if (expect_ack) {
+            uint16_t ack_expect;
+            int wait_periods;
+            if (dst == RADIO_ADR_BROADCAST) {
+                // (You can also choose to NOT expect ACKs for broadcast)
+                wait_periods = SWARM_NUM_DEVICES + 4;
+                ack_expect = ((1 << SWARM_NUM_DEVICES) - 1) & ~(1 << swarm_id);
+            } else {
+                wait_periods = 4;
+                ack_expect = 1 << dst;
+            }
+
+            xSemaphoreTake(ack_mutex, portMAX_DELAY);
+            tx_packet->seq = seq_nums[swarm_id] = seq;
+            ack_received = 0;
+            xSemaphoreGive(ack_mutex);
+
+            radiolinkSendP2PPacketBroadcast(&tx_p2p_packet);
+
+            bool success = false;
+            for (int wp = wait_periods; wp > 0; wp--) {
+                vTaskDelay(M2T(RADIO_SLOT_DURATION));
+                xSemaphoreTake(ack_mutex, portMAX_DELAY);
+                if (ack_received == ack_expect) { xSemaphoreGive(ack_mutex); success = true; break; }
+                xSemaphoreGive(ack_mutex);
+            }
+
+            if (!success) {
+                vTaskDelay(swarm_id * RADIO_SLOT_DURATION);
+                continue; // retry same chunk
+            }
+        } else {
+            // Fire-and-forget when sending to the bridge
+            xSemaphoreTake(ack_mutex, portMAX_DELAY);
+            tx_packet->seq = seq_nums[swarm_id] = seq;
+            xSemaphoreGive(ack_mutex);
+
+            radiolinkSendP2PPacketBroadcast(&tx_p2p_packet);
+        }
+
+        offset += payload_len;
+        seq = (seq + 1) & 0xF;
+    }
+}
+
 
 static void handle_rx_packet(comm_packet_t *p, size_t len) {
 

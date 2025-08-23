@@ -23,8 +23,6 @@
 #include "swarm_radio.h"
 #include "swarm_comm.h"
 #include "util.h"
-#include "debug.h"
-
 
 typedef struct {
     uint8_t addr;
@@ -80,7 +78,6 @@ void ctrl_msg_handler(CRTPPacket *pk) {
 
 void appMain() {
 
-    DEBUG_PRINT("P2P-BRIDGE: ACTIVE\n");
     tx_queue = xQueueCreateStatic(
             sizeof(tx_queue_buf) / sizeof(tx_queue_item_t),
             sizeof(tx_queue_item_t), tx_queue_buf, &tx_queue_static);
